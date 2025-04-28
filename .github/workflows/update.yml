@@ -1,0 +1,48 @@
+name: Update Dependencies
+
+on:
+  push:
+    branches:
+      - main 
+    paths:
+      - '.github/workflows/update.yml'
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history for all branches and tags
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'  # You can change the Node.js version as needed
+
+    - name: Install dependencies
+      run: |
+        npm ci  # Use npm ci for a clean install based on package-lock.json
+
+    - name: Remove pagedone package and install lru-cache
+      run: |      
+        npm install express multer @aws-sdk/client-s3 uuid sharp dotenv
+        
+    - name: Commit changes
+      run: |
+        git config --local user.name "github-actions"
+        git config --local user.email "github-actions@github.com"
+        # Stash any unstaged changes before pulling
+        git stash -u
+        git pull origin main --rebase  # Pull latest changes before pushing
+        # Pop the stash if needed
+        git stash pop || true
+        git add package.json package-lock.json
+        git diff --cached --quiet || git commit -m "chore: update dependencies"  # Commit only if there are changes
+        git push origin main  # Specify the remote and branch to push to
+
+    - name: Run tests
+      run: |
+        npm test  # Run tests if you have a test script
