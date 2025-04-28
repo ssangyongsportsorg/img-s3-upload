@@ -1,7 +1,7 @@
-// app.js - Simple image upload & delete API backed by AWS S3
+// app.js - Simple image upload & delete API backed by AWS S3 (or any S3‑compatible endpoint)
 // Matches the parameter/response style of the imgbb example
 // -----------------------------------------------------------
-// Author: Sysport Team
+// Author: Sysport Team (modified by Peteryang)
 // Usage:
 //   1. npm install express multer @aws-sdk/client-s3 uuid sharp dotenv
 //   2. Create a .env file with the variables shown at the end of this file
@@ -14,7 +14,11 @@
 
 const express = require('express');
 const multer  = require('multer');
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand
+} = require('@aws-sdk/client-s3');
 const { v4: uuidv4 } = require('uuid');
 const sharp = require('sharp');
 const path  = require('path');
@@ -25,18 +29,33 @@ dotenv.config();
 // ─────────────────────────────────────────────────────────────
 // Basic config
 // ─────────────────────────────────────────────────────────────
-const PORT        = process.env.PORT || 3000;
-const BUCKET      = process.env.S3_BUCKET;
-const REGION      = process.env.AWS_REGION;
-const VALID_KEYS  = (process.env.API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean);
+const PORT         = process.env.PORT || 3000;
+const BUCKET       = process.env.S3_BUCKET;
+const REGION       = process.env.AWS_REGION;
+const VALID_KEYS   = (process.env.API_KEYS || '').split(',')
+  .map(k => k.trim())
+  .filter(Boolean);
+
+// Optional custom S3 endpoint (e.g. for non‑AWS S3‑compatible services)
+const SERVER_HOST  = process.env.SERVER_HOST || '';
 
 if (!BUCKET || !REGION) {
   console.error('❌  Missing S3_BUCKET or AWS_REGION env vars');
   process.exit(1);
 }
 
+// Build S3 client options
+const s3Options = {
+  region: REGION
+};
+if (SERVER_HOST) {
+  // use custom endpoint, and force path style if needed
+  s3Options.endpoint = SERVER_HOST;
+  s3Options.forcePathStyle = true;
+}
+
 // S3 client (SDK v3)
-const s3 = new S3Client({ region: REGION });
+const s3 = new S3Client(s3Options);
 
 // Multer in‑memory storage (32 MB limit)
 const upload = multer({
@@ -56,6 +75,11 @@ function auth(req, res, next) {
 }
 
 function buildS3Url(filename) {
+  if (SERVER_HOST) {
+    // custom endpoint URL
+    return `${SERVER_HOST}/${BUCKET}/${filename}`;
+  }
+  // AWS default URL
   return `https://${BUCKET}.s3.${REGION}.amazonaws.com/${filename}`;
 }
 
@@ -78,14 +102,18 @@ app.post('/upload', auth, upload.single('image'), async (req, res) => {
     }
 
     // Generate identifiers & filenames
-    const id        = uuidv4().slice(0, 7);               // 7‑char id like imgbb
-    const ext       = path.extname(req.file.originalname) || `.${req.file.mimetype.split('/')[1]}`;
+    const id        = uuidv4().slice(0, 7); // 7‑char id like imgbb
+    const ext       = path.extname(req.file.originalname)
+                     || `.${req.file.mimetype.split('/')[1]}`;
     const filename  = `${id}${ext}`;
-    const title     = (req.body.name || path.parse(filename).name).replace(/\s+/g, '_');
+    const title     = (req.body.name || path.parse(filename).name)
+                      .replace(/\s+/g, '_');
 
     // Optional auto‑delete expiration (seconds)
     const expirationInput = req.query.expiration || req.body.expiration;
-    const expiration      = expirationInput ? clampExpiration(expirationInput) : 0;
+    const expiration      = expirationInput
+                            ? clampExpiration(expirationInput)
+                            : 0;
 
     // Extract basic image metadata (width/height)
     let width = '', height = '';
@@ -93,8 +121,8 @@ app.post('/upload', auth, upload.single('image'), async (req, res) => {
       const meta = await sharp(req.file.buffer).metadata();
       width  = meta.width?.toString()  || '';
       height = meta.height?.toString() || '';
-    } catch (err) {
-      /* non‑fatal */
+    } catch {
+      // non‑fatal
     }
 
     // Upload to S3
@@ -109,7 +137,7 @@ app.post('/upload', auth, upload.single('image'), async (req, res) => {
       }
     }));
 
-    const url = buildS3Url(filename);
+    const url   = buildS3Url(filename);
     const epoch = Math.floor(Date.now() / 1000).toString();
 
     // Build response in imgbb style
@@ -157,7 +185,10 @@ app.delete('/image/:filename', auth, async (req, res) => {
       return res.status(400).json({ status: 400, error: 'Missing filename' });
     }
 
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: filename }));
+    await s3.send(new DeleteObjectCommand({
+      Bucket: BUCKET,
+      Key: filename
+    }));
     res.json({ status: 200, success: true, message: 'Image deleted' });
   } catch (err) {
     console.error(err);
@@ -166,15 +197,18 @@ app.delete('/image/:filename', auth, async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => console.log(`🚀  S3 Image API running on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀  S3 Image API running on http://localhost:${PORT}`);
+});
 
 // ─────────────────────────────────────────────────────────────
 // .env template
 // ─────────────────────────────────────────────────────────────
 // PORT=3000
-// AWS_REGION=ap‑southeast‑1
-// S3_BUCKET=my‑image‑bucket
-// AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
-// AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
-// API_KEYS=my‑secure‑api‑key (comma‑separated list if you need multiple)
+// AWS_REGION=us-east-1
+// S3_BUCKET=bucket-1286-1793
+// AWS_ACCESS_KEY_ID=1286JjKcPQxzim
+// AWS_SECRET_ACCESS_KEY=NDqxsSGsV4nr4D99GAFaJWXLaQrx2076yKSvs8Ja
+// API_KEYS=my-secret-api-key
+// SERVER_HOST=https://ny-1s.enzonix.com
 // -----------------------------------------------------------
