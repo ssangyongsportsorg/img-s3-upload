@@ -1,7 +1,7 @@
 // app.js - Simple image upload & delete API backed by AWS S3
 // Matches the parameter/response style of the imgbb example
 // -----------------------------------------------------------
-// Author: ChatGPT (OpenAI o3)
+// Author: Sysport Team
 // Usage:
 //   1. npm install express multer @aws-sdk/client-s3 uuid sharp dotenv
 //   2. Create a .env file with the variables shown at the end of this file
